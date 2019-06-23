@@ -170,7 +170,7 @@ void connect_to_wifi()
     delay(500);
     Serial.println("Connecting to WiFi..");
   }
-   
+  delay(100); 
   Serial.println("Connected to the WiFi network");
 
 }
@@ -184,39 +184,42 @@ void connect_to_mqtt()
       Serial.println("Connecting to MQTT...State:");
       Serial.println(client.state());
     }
-
+  Serial.println("Connected to to MQTT...State:");
+  Serial.println(client.state());
   String payload = "{\"";
   payload.concat(WiFi.macAddress());
-  payload.concat("\": [");
+  payload.concat("\": \"");
   
   for (int u = 0; u < clients_known_count; u++){
     
-    for (int i = 0; i < 6; i++) payload.concat(String(clients_known[u].station[i], HEX));
+    for (int i = 0; i < 6; i++) 
+    payload.concat(String(clients_known[u].station[i], HEX));
     payload.concat(" : ");
     payload.concat("client");
     payload.concat(" : ");
     payload.concat(clients_known[u].rssi);
 
-    if(u != clients_known_count){
+    if(u != clients_known_count-1){
       payload.concat(" , ");
     }
         
   }
-  
+  payload.concat(" , ");
   for (int u = 0; u < aps_known_count; u++){
     
-    for (int i = 0; i < 6; i++) payload.concat(String(aps_known[u].bssid[i], HEX));
+    for (int i = 0; i < 6; i++) 
+    payload.concat(String(aps_known[u].bssid[i], HEX));
     payload.concat(" : ");
     payload.concat( String((char *)aps_known[u].ssid) );
     payload.concat(" : ");
     payload.concat(aps_known[u].rssi);
 
-    if(u != clients_known_count){
+    if(u != aps_known_count-1){
       payload.concat(" , ");
     }
         
   }
-  payload.concat("]}");
+  payload.concat("\"}");
 
   //payload size
   int payload_len = payload.length() + 1;
@@ -224,12 +227,12 @@ void connect_to_mqtt()
   char data[payload_len];
   
   payload.toCharArray(data, payload_len);
-  
+  Serial.print("MQTT Max payload size (bytes): "); Serial.println(MQTT_MAX_PACKET_SIZE);
+  Serial.print("Payload size:"); Serial.println(payload_len);
   Serial.println(payload);
+  
   if(client.publish("wully/wifi", data ) == false) {
     Serial.println("Failed to send payload:");
-    Serial.println("Payload size:");
-    Serial.println(payload_len);
     Serial.println(client.state());
   } else {
     Serial.println("Data published!");
@@ -237,5 +240,7 @@ void connect_to_mqtt()
 
   client.disconnect();
   memset(aps_known, 0, sizeof(aps_known));
+  aps_known_count = 0;
   memset(clients_known, 0, sizeof(clients_known));
+  clients_known_count = 0;
 }
