@@ -104,40 +104,49 @@ void print_client(clientinfo ci)
     for (int i = 0; i < 6; i++) Serial.printf("%02x", ci.station[i]);
     Serial.printf(" ==> ");
 
+    //check if mac address exists as an AP so we can get its ssid
     for (u = 0; u < aps_known_count; u++)
     {
       if (! memcmp(aps_known[u].bssid, ci.bssid, ETH_MAC_LEN)) {
         Serial.printf("[%32s]", aps_known[u].ssid);
         known = 1;     // AP known => Set known flag
         break;
-      }
+      } 
     }
-
+    
     if (! known)  {
-      Serial.printf("   Unknown/Malformed packet \r\n");
+      Serial.printf("[%32s]", "UNKNOWN_SSID");
+      Serial.printf("%2s", " ");
       for (int i = 0; i < 6; i++) Serial.printf("%02x", ci.bssid[i]);
+      Serial.printf("  %3d", -1);
     } else {
       Serial.printf("%2s", " ");
       for (int i = 0; i < 6; i++) Serial.printf("%02x", ci.ap[i]);
       Serial.printf("  %3d", aps_known[u].channel);
-      Serial.printf("   %4d\r\n", ci.rssi);
+      
     }
+    Serial.printf("   %4d\r\n", ci.rssi);
   }
 }
 
 void promisc_cb(uint8_t *buf, uint16_t len)
 {
   int i = 0;
-  uint16_t seq_n_new = 0;
+ 
+  //control frame, no useful data
   if (len == 12) {
     struct RxControl *sniffer = (struct RxControl*) buf;
   } else if (len == 128) {
+    
     struct sniffer_buf2 *sniffer = (struct sniffer_buf2*) buf;
+    
     struct beaconinfo beacon = parse_beacon(sniffer->buf, 112, sniffer->rx_ctrl.rssi);
+    
     if (register_beacon(beacon) == 0) {
       print_beacon(beacon);
       nothing_new = 0;
     }
+    
   } else {
     struct sniffer_buf *sniffer = (struct sniffer_buf*) buf;
     //Is data or QOS?
@@ -191,33 +200,36 @@ void connect_to_mqtt()
   payload.concat("\": \"");
   
   for (int u = 0; u < clients_known_count; u++){
-    
-    for (int i = 0; i < 6; i++) 
-    payload.concat(String(clients_known[u].station[i], HEX));
-    payload.concat(" : ");
-    payload.concat("client");
-    payload.concat(" : ");
-    payload.concat(clients_known[u].rssi);
-
-    if(u != clients_known_count-1){
-      payload.concat(" , ");
+    if(clients_known[u].err == 0){
+      if(u != 0){
+        payload.concat(",");
+      }   
+      payload.concat("device:");
+      for (int i = 0; i < 6; i++) payload.concat(String(clients_known[u].station[i], HEX));
+      payload.concat(":");
+      for (int i = 0; i < 6; i++) payload.concat(String(clients_known[u].ap[i], HEX));
+      payload.concat(":");
+      for (int i = 0; i < 6; i++) payload.concat(String(clients_known[u].bssid[i], HEX));
+      payload.concat(":");
+      payload.concat(clients_known[u].rssi);
     }
-        
   }
-  payload.concat(" , ");
+  payload.concat(",");
   for (int u = 0; u < aps_known_count; u++){
-    
-    for (int i = 0; i < 6; i++) 
-    payload.concat(String(aps_known[u].bssid[i], HEX));
-    payload.concat(" : ");
-    payload.concat( String((char *)aps_known[u].ssid) );
-    payload.concat(" : ");
-    payload.concat(aps_known[u].rssi);
 
-    if(u != aps_known_count-1){
-      payload.concat(" , ");
+    if(aps_known[u].err == 0){
+      if(u != 0){
+        payload.concat(",");
+      }   
+      payload.concat("beacon:");
+      //print AP ssid
+      payload.concat( String((char *)aps_known[u].ssid) );
+      payload.concat(":");
+      //print the AP MAC address
+      for (int i = 0; i < 6; i++) payload.concat(String(aps_known[u].bssid[i], HEX));
+      payload.concat(":");
+      payload.concat(aps_known[u].rssi);
     }
-        
   }
   payload.concat("\"}");
 
