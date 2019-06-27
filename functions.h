@@ -123,9 +123,17 @@ void print_client(clientinfo ci)
       Serial.printf("%2s", " ");
       for (int i = 0; i < 6; i++) Serial.printf("%02x", ci.ap[i]);
       Serial.printf("  %3d", aps_known[u].channel);
-      
+     
     }
-    Serial.printf("   %4d\r\n", ci.rssi);
+    Serial.printf("   %4d", ci.rssi);
+    Serial.print("   ");
+    if( ci.frametype==0x40 ){
+      Serial.print("Probe Request");
+    }
+    if( ci.frametype==0x80 ){
+      Serial.print("Beacon");
+    }    
+    Serial.print("\r\n");
   }
 }
 
@@ -150,15 +158,15 @@ void promisc_cb(uint8_t *buf, uint16_t len)
   } else {
     struct sniffer_buf *sniffer = (struct sniffer_buf*) buf;
     //Is data or QOS?
-    if((buf[12]==0x88)||(buf[12]==0x40)||(buf[12]==0x94)||(buf[12]==0xa4)||(buf[12]==0xb4)||(buf[12]==0x08)){
-      struct clientinfo ci = parse_data(sniffer->buf, 36, sniffer->rx_ctrl.rssi, sniffer->rx_ctrl.channel);
+    //if((buf[12]==0x88)||(buf[12]==0x40)||(buf[12]==0x94)||(buf[12]==0xa4)||(buf[12]==0xb4)||(buf[12]==0x08)){
+      struct clientinfo ci = parse_data(sniffer->buf, 36, sniffer->rx_ctrl.rssi, sniffer->rx_ctrl.channel, buf[12]);
       if (memcmp(ci.bssid, ci.station, ETH_MAC_LEN)) {
         if (register_client(ci) == 0) {
           print_client(ci);
           nothing_new = 0;
         }
       }
-    }
+    //}
   }
 }
 

@@ -15,6 +15,8 @@ struct beaconinfo
   int err;
   signed rssi;
   uint8_t capa[2];
+  uint8_t interval[2];
+  uint8_t timestamp[8];
 };
 
 struct clientinfo
@@ -22,6 +24,7 @@ struct clientinfo
   uint8_t bssid[ETH_MAC_LEN];
   uint8_t station[ETH_MAC_LEN];
   uint8_t ap[ETH_MAC_LEN];
+  uint8_t frametype;
   int channel;
   int err;
   signed rssi;
@@ -78,12 +81,13 @@ struct sniffer_buf2 {
   uint16_t len;
 };
 
-struct clientinfo parse_data(uint8_t *frame, uint16_t framelen, signed rssi, unsigned channel)
+struct clientinfo parse_data(uint8_t *frame, uint16_t framelen, signed rssi, unsigned channel,uint8_t frametype )
 {
   struct clientinfo ci;
   ci.channel = channel;
   ci.err = 0;
   ci.rssi = rssi;
+  ci.frametype = frametype;
   int pos = 36;
   uint8_t *bssid;
   uint8_t *station;
@@ -176,6 +180,17 @@ struct beaconinfo parse_beacon(uint8_t *frame, uint16_t framelen, signed rssi)
     bi.err = -3;
   }
 
+  //lol learn memcpy
+  bi.timestamp[0] = frame[23];
+  bi.timestamp[1] = frame[24];
+  bi.timestamp[2] = frame[25];
+  bi.timestamp[3] = frame[26];
+  bi.timestamp[4] = frame[27];
+  bi.timestamp[5] = frame[28];
+  bi.timestamp[6] = frame[30];
+  bi.timestamp[7] = frame[31];
+  bi.interval[0] = frame[32];
+  bi.interval[1] = frame[33];
   bi.capa[0] = frame[34];
   bi.capa[1] = frame[35];
   memcpy(bi.bssid, frame + 10, ETH_MAC_LEN);
