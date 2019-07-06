@@ -23,10 +23,10 @@ clientinfo clients_known[MAX_CLIENTS_TRACKED];            // Array to save MACs 
 int clients_known_count = 0;                              // Number of known CLIENTs
 
 
-const char* ssid = "HouseN";
-const char* password = "Calc1um5";
+const char* ssid = "/////";
+const char* password = "/////";
 
-const char* mqttServer = "192.168.1.200";
+const char* mqttServer = "192.168.1.X";
 const int mqttPort = 1883;
 
 WiFiClient espClient;
@@ -81,61 +81,6 @@ int register_client(clientinfo ci)
   return known;
 }
 
-void print_beacon(beaconinfo beacon)
-{
-  if (beacon.err != 0) {
-    //Serial.printf("BEACON ERR: (%d)  ", beacon.err);
-  } else {
-    Serial.printf("BEACON: <=============== [%32s]  ", beacon.ssid);
-    for (int i = 0; i < 6; i++) Serial.printf("%02x", beacon.bssid[i]);
-    Serial.printf("   %2d", beacon.channel);
-    Serial.printf("   %4d\r\n", beacon.rssi);
-  }
-}
-
-void print_client(clientinfo ci)
-{
-  int u = 0;
-  int known = 0;   // Clear known flag
-  if (ci.err != 0) {
-    // nothing
-  } else {
-    Serial.printf("DEVICE: ");
-    for (int i = 0; i < 6; i++) Serial.printf("%02x", ci.station[i]);
-    Serial.printf(" ==> ");
-
-    //check if mac address exists as an AP so we can get its ssid
-    for (u = 0; u < aps_known_count; u++)
-    {
-      if (! memcmp(aps_known[u].bssid, ci.bssid, ETH_MAC_LEN)) {
-        Serial.printf("[%32s]", aps_known[u].ssid);
-        known = 1;     // AP known => Set known flag
-        break;
-      } 
-    }
-    
-    if (! known)  {
-      Serial.printf("[%32s]", "UNKNOWN_SSID");
-      Serial.printf("%2s", " ");
-      for (int i = 0; i < 6; i++) Serial.printf("%02x", ci.bssid[i]);
-      Serial.printf("  %3d", -1);
-    } else {
-      Serial.printf("%2s", " ");
-      for (int i = 0; i < 6; i++) Serial.printf("%02x", ci.ap[i]);
-      Serial.printf("  %3d", aps_known[u].channel);
-     
-    }
-    Serial.printf("   %4d", ci.rssi);
-    Serial.print("   ");
-    if( ci.frametype==0x40 ){
-      Serial.print("Probe Request");
-    }
-    if( ci.frametype==0x80 ){
-      Serial.print("Beacon");
-    }    
-    Serial.print("\r\n");
-  }
-}
 
 void promisc_cb(uint8_t *buf, uint16_t len)
 {
@@ -151,7 +96,6 @@ void promisc_cb(uint8_t *buf, uint16_t len)
     struct beaconinfo beacon = parse_beacon(sniffer->buf, 112, sniffer->rx_ctrl.rssi);
     
     if (register_beacon(beacon) == 0) {
-      print_beacon(beacon);
       nothing_new = 0;
     }
     
@@ -161,8 +105,7 @@ void promisc_cb(uint8_t *buf, uint16_t len)
     //if((buf[12]==0x88)||(buf[12]==0x40)||(buf[12]==0x94)||(buf[12]==0xa4)||(buf[12]==0xb4)||(buf[12]==0x08)){
       struct clientinfo ci = parse_data(sniffer->buf, 36, sniffer->rx_ctrl.rssi, sniffer->rx_ctrl.channel, buf[12]);
       if (memcmp(ci.bssid, ci.station, ETH_MAC_LEN)) {
-        if (register_client(ci) == 0) {
-          print_client(ci);
+        if (register_client(ci) == 0) {          
           nothing_new = 0;
         }
       }
@@ -172,11 +115,19 @@ void promisc_cb(uint8_t *buf, uint16_t len)
 
 void listen_to_wifi()
 {
+  WiFi.softAP("espnode");
+  Serial.println("I am an AP");
+  delay(random(1000,2000));
+  WiFi.softAPdisconnect();
+  WiFi.disconnect();
+  WiFi.mode(WIFI_STA);
+  delay(100);
   wifi_set_opmode(STATION_MODE);            // Promiscuous works only with station mode
   wifi_promiscuous_enable(0);
   wifi_set_promiscuous_rx_cb(promisc_cb);   // Set up promiscuous callback
   wifi_promiscuous_enable(1);
 }
+
 
 void connect_to_wifi()
 {
@@ -205,20 +156,25 @@ void connect_to_mqtt()
   Serial.println(client.state());
   String payload = "{\"";
   payload.concat(WiFi.macAddress());
+  payload.concat("-");
+  payload.concat(WiFi.softAPmacAddress());
   payload.concat("\": \"");
-  
+  char mac[18] = "";
   for (int u = 0; u < clients_known_count; u++){
     if(clients_known[u].err == 0){
       if(u != 0){
         payload.concat(",");
       }   
-      payload.concat("device:");
-      for (int i = 0; i < 6; i++) payload.concat(String(clients_known[u].station[i], HEX));
-      payload.concat(":");
-      for (int i = 0; i < 6; i++) payload.concat(String(clients_known[u].ap[i], HEX));
-      payload.concat(":");
-      for (int i = 0; i < 6; i++) payload.concat(String(clients_known[u].bssid[i], HEX));
-      payload.concat(":");
+      payload.concat("device|");
+      sprintf(mac,"%02x:%02x:%02x:%02x:%02x:%02x",clients_known[u].station[0],clients_known[u].station[1],clients_known[u].station[2],clients_known[u].station[3],clients_known[u].station[4],clients_known[u].station[5]);
+      payload.concat(String(mac)); //sender
+      payload.concat("|");
+      sprintf(mac,"%02x:%02x:%02x:%02x:%02x:%02x",clients_known[u].ap[0],clients_known[u].ap[1],clients_known[u].ap[2],clients_known[u].ap[3],clients_known[u].ap[4],clients_known[u].ap[5]);
+      payload.concat(String(mac)); //dest      
+      payload.concat("|");
+      sprintf(mac,"%02x:%02x:%02x:%02x:%02x:%02x",clients_known[u].bssid[0],clients_known[u].bssid[1],clients_known[u].bssid[2],clients_known[u].bssid[3],clients_known[u].bssid[4],clients_known[u].bssid[5]);
+      payload.concat(String(mac)); //ap
+      payload.concat("|");
       payload.concat(clients_known[u].rssi);
     }
   }
@@ -229,13 +185,14 @@ void connect_to_mqtt()
       if(u != 0){
         payload.concat(",");
       }   
-      payload.concat("beacon:");
+      payload.concat("beacon|");
       //print AP ssid
       payload.concat( String((char *)aps_known[u].ssid) );
-      payload.concat(":");
+      payload.concat("|");
       //print the AP MAC address
-      for (int i = 0; i < 6; i++) payload.concat(String(aps_known[u].bssid[i], HEX));
-      payload.concat(":");
+      sprintf(mac,"%02x:%02x:%02x:%02x:%02x:%02x",aps_known[u].bssid[0],aps_known[u].bssid[1],aps_known[u].bssid[2],aps_known[u].bssid[3],aps_known[u].bssid[4],aps_known[u].bssid[5]);
+      payload.concat(String(mac)); //sender
+      payload.concat("|");
       payload.concat(aps_known[u].rssi);
     }
   }
