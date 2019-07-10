@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="UTF-8">
+		<title>MQTT Test</title>
+		<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/0.8.0/p5.js"></script>
+
+	</head>
+	<body>
+		<script>
+			// The scale of our world
+			let zoom;
+			// A vector to store the offset from the center
+			let offset;
+			// The previous offset
+			let poffset;
+			// A vector for the mouse position
+			let mouse;
+			
+			
+			let testing = false;			
+			let pwrScale = 100;
+			let showClientRing = false;
+			let showNodeRing = false;
+			let showClients = false;
+			let filter = null;
+			let showAp = true;
+			let showClient = true;
+			let wifiData = {};
+			let nodeData = {};
+			let clientData = {};
+			
+
+			let client  = mqtt.connect('ws://192.168.1.200:1884')
+			
+			
+			client.on('connect', function () {
+				console.log("connected")
+				client.subscribe('wully/wifi')
+			})
+
+			client.on('message', function (topic, message) {
+				// message is Buffer
+				console.log("got data");
+				parseData(message);
+				console.log(wifiData);
+				draw();
+			})
+			
+			
+			
+			function parseData(message) {
+				
+				let time = Date.now();
+				let data;
+				try {
+					data = JSON.parse(message);
+				} catch (e) { 
+					console.log("unexpected error parsing json"); 
+				}
+				
+				for (let esp in data) {
+					console.log("Data was from " + esp);
+					if( !(esp in wifiData) ) {
+						wifiData[esp] = { 
+						};
+					}
+					
+					let sniff = data[esp].toUpperCase().split(",");
+					
+					for (let c in sniff) {
+						let row = sniff[c].split("|");
+	
+						if(row[0] == "BEACON"){
+						
+							let exist = !(row[2] in wifiData[esp]) && ( wifiData[esp][row[2]] = { ssid: row[1], type: "ap", rssi: [] } );
+							
+							wifiData[esp][row[2]]["rssi"].push ({
+								ts: time,
+								pwr: row[3]
+							});
+								
+						} else {
+						
+							let exist = !(row[1] in wifiData[esp]) && ( wifiData[esp][row[1]] = { dest: row[2], ap: row[3], type: "client", rssi: []} );
+							
+							wifiData[esp][row[1]]["rssi"].push ({
+								ts: time,
+								pwr: row[4]
+							});
+							
+						}
+					}
+					
+					
+				}
+			}
+			
+			
+			function parseEspMac(esp){
+				//let macs = esp.replace(/:/g,"").toLowerCase();
+				macs = esp.toLowerCase();
+				return macs.split("-");
+			}
+			function setup() {
+				createCanvas(windowWidth, windowHeight);
+				zoom = 1.0;
+				offset = {x:0,y:0};
+				poffset ={x:0,y:0};
+				//noLoop();
+			}
+
+			function draw() {
+				//let zoom = 1.2;  // 150%
+				//scale(zoom);
+				// Everything must be drawn relative to center
+				translate(width/2, height/2);
+				  
+				// Use scale for 2D "zoom"
+				scale(zoom);
+				// The offset (note how we scale according to the zoom)
+				translate(offset.x/zoom, offset.y/zoom);
+				//assume first reference point is centre of the screen
+				
+
+				
+				calcNodeData();
+				
+				background(220);
+				noFill();
+				//draw cross the centre
+				stroke('#222222');
+				strokeWeight(0.1);
+				for(let i = -5000; i<5001;i = i + pwrScale){
+					line(-5000, i, 5000, i);		
+					line(i, -5000, i,5000);
+				}						
+				strokeWeight(1);
+
+				
+				//draw our nodes
+				let go = false;
+				//console.log(nodeData);
+				let keys = Object.keys(nodeData);
+				if(keys.length == 3){
+					if(Object.keys(nodeData[keys[0]]["OtherNodes"]).length == 2 && Object.keys(nodeData[keys[1]]["OtherNodes"]).length == 2 && Object.keys(nodeData[keys[2]]["OtherNodes"]).length == 2){
+						go = true;
+					}
+				}
+				
+				//console.log(nodeData);
+				if(go){
+					
+					drawNodes();
+					
+				}
+
+				
+			}
+			function drawNodes(){
+				//console.log("drawing..");
+				let xO = 0;
+				let yO = 0;
+	
+				let nodes = Object.keys(nodeData);
+				
+				//Get our first node
+				let pA = nodes[0]; //store the mac addresss in pA
+				let nodeA = nodeData[pA];
+				
+				//find the othernodes our first node knows
+				let otherNodes = Object.keys(nodeA["OtherNodes"]);	
+				
+				
+				//get the other nodes
+				let pB = otherNodes[0];
+				let nodeB = nodeData[pB];
+				let pC = otherNodes[1];
+				let nodeC = nodeData[pC];
+				
+
+				//check if valid triangle otherwise dont update the positions
+				//a + b > c
+				//a + c > b
+				//b + c > a
+				
+				let ASide = nodeB["OtherNodes"][pA];
+				let BSide = nodeA["OtherNodes"][pB];
+				let CSide = nodeA["OtherNodes"][pC];
+				
+				
+				if( ( (ASide + BSide) > CSide ) && ( (ASide + CSide) > BSide ) && ( (CSide + BSide) > ASide ) ) {
+				
+					//set positions
+					nodeA.x = xO;
+					nodeA.y = yO;
+					
+					nodeB.x = (xO+nodeB["OtherNodes"][pA]);
+					nodeB.y = yO;
+					
+					nodeC.x = 0;
+					nodeC.y = 0;
+					
+					let possiblePos = circleCircleIntersectionPoints(nodeA.x,nodeA.y,nodeA["OtherNodes"][pC]  , nodeB.x,nodeB.y,nodeB["OtherNodes"][pC]);
+					
+					if(possiblePos.length > 0) {
+						//use the one higher on the y axis
+						if(possiblePos[0].y > possiblePos[1].y){							
+							nodeC.x = possiblePos[0].x;
+							nodeC.y = possiblePos[0].y;
+						} else {
+							nodeC.x = possiblePos[1].x;
+							nodeC.y = possiblePos[1].y;
+						}
+																	
+					}
+					
+					drawEsp("nodeA",nodeA.x,nodeA.y,nodeA.color);				
+					drawEsp("nodeB",nodeB.x,nodeB.y,nodeB.color);							
+					drawEsp("nodeC",nodeC.x,nodeC.y,nodeC.color);	
+					
+					if(showNodeRing){
+						drawRssi(pB,nodeA.x,nodeA.y,nodeA["OtherNodes"][pB],nodeB.color);
+						drawRssi(pC,nodeA.x,nodeA.y,nodeA["OtherNodes"][pC],nodeC.color);
+						drawRssi(pB,nodeB.x,nodeB.y,nodeB["OtherNodes"][pA],nodeA.color);
+						drawRssi(pC,nodeB.x,nodeB.y,nodeB["OtherNodes"][pC],nodeC.color);
+						drawRssi(pA,nodeC.x,nodeC.y,nodeC["OtherNodes"][pA],nodeA.color);
+						drawRssi(pB,nodeC.x,nodeC.y,nodeC["OtherNodes"][pB],nodeB.color);
+					}
+				
+
+						
+				}
+				//console.log(nodeData);
+				
+				//iterate through the nodes and find clients which they have all seen and calculate its position
+				
+				
+				if(showClients){
+					drawClients(pA,pB,pC,nodeA,nodeB,nodeC);
+				}
+			}
+			
+			function drawClients(pA,pB,pC,nodeA,nodeB,nodeC){
+				for(let c in wifiData[pA]){
+										
+					if(c in wifiData[pB] && c in wifiData[pC]){
+						
+						let client = wifiData[pA][c];
+						//initialize client so it always has same colour 
+						if(!(c in clientData)) { 
+							clientData[c] = {
+								color: color(random(255),random(255),random(255)),
+								x: 0,
+								y: 0
+							}; 
+						}
+						
+						//get powers for this client
+						
+						let rA = 0;
+						let rB = 0;
+						let rC = 0;
+						
+						if(wifiData[pA][c].type == "ap") {
+							rA = getAverageRssi(wifiData[pA][c].rssi);
+							rB = getAverageRssi(wifiData[pB][c].rssi);
+							rC = getAverageRssi(wifiData[pC][c].rssi);
+						} else {
+							rA = getLatestRssi(wifiData[pA][c].rssi);
+							rB = getLatestRssi(wifiData[pB][c].rssi);
+							rC = getLatestRssi(wifiData[pC][c].rssi);
+						}
+						
+						
+						let p1 = {x: nodeA.x,y: nodeA.x,z:1,r: rA};
+						let p2 = {x: nodeB.x,y: nodeB.y,z:1,r: rB}
+						let p3 = {x: nodeC.x,y: nodeC.y,z:1,r: rC}
+						//get client position
+						//console.log("rA: " + rA + " rB: " +rB + " rC: " + rC);
+						
+						//https://github.com/oDjonathanKrause/CodeForFun/blob/master/p5.js/Trilateration/sketch.js
+						var S = (Math.pow(p3.x, 2.) - Math.pow(p2.x, 2.) + Math.pow(p3.y, 2.) - Math.pow(p2.y, 2.) + Math.pow(rB, 2.) - Math.pow(rC, 2.)) / 2.0;
+						var T = (Math.pow(p1.x, 2.) - Math.pow(p2.x, 2.) + Math.pow(p1.y, 2.) - Math.pow(p2.y, 2.) + Math.pow(rB, 2.) - Math.pow(rA, 2.)) / 2.0;
+						var y = ((T * (p2.x - p3.x)) - (S * (p2.x - p1.x))) / (((p1.y - p2.y) * (p2.x - p3.x)) - ((p3.y - p2.y) * (p2.x - p1.x)));
+						var x = ((y * (p1.y - p2.y)) - T) / (p2.x - p1.x)
+						//console.log("x: " + x + " y: " + y);
+						if(isNaN(x) && isNaN(y)){
+							clientData[c].x = x;
+							clientData[c].y = y;
+						}
+						
+						if(wifiData[pA][c].ssid == filter || filter == null || c == filter){
+							
+							if(wifiData[pA][c].type == "ap") {
+								if(showAp){
+									drawEsp(wifiData[pA][c].ssid + "\n"+c,x,y,color(clientData[c].color));	
+									if(showClientRing){
+										drawRssi(pA,nodeA.x,nodeA.y,rA,clientData[c].color);
+										drawRssi(pB,nodeB.x,nodeB.y,rB,clientData[c].color);
+										drawRssi(pC,nodeC.x,nodeC.y,rC,clientData[c].color);
+									}
+								}
+								
+							} else {
+								if(showClient){
+									drawEsp(c,x,y,color(clientData[c].color));	
+									if(showClientRing){
+										drawRssi(pA,nodeA.x,nodeA.y,rA,clientData[c].color);
+										drawRssi(pB,nodeB.x,nodeB.y,rB,clientData[c].color);
+										drawRssi(pC,nodeC.x,nodeC.y,rC,clientData[c].color);
+									}
+								}
+								
+							}
+							
+						}
+						
+					}		
+					
+				}
+			}
+			
+			function get_third_point_coordinates(a, b, c){
+				let result = {x:0,y:0};
+
+				if(a > 0){
+				result.x = (c*c - b*b + a*a) / (2*a);
+				}
+
+				result.y = Math.sqrt(c*c - result.x*result.x);
+				return result;
+			}
+			
+			function calcNodeData(){
+				//get a list of all the nodes
+				let nodes = Object.keys(wifiData);
+				
+				//populate the nodeData structure
+				for (let i in nodes) {
+					c = [0,0,0];
+					c[i] = 255;
+					nodeData[nodes[i]] = {
+						"OtherNodes": {},
+						"x": 0,
+						"y": 0,
+						"color": color(c[0],c[1],c[2])
+					};
+				}
+				
+				//for each node
+				for (let i in nodes) {
+					let refEsp = nodes[i];
+					
+					
+					
+					//initialise nodeData with the other nodes in the network
+					for (let j in nodes){
+						let otherNode = nodes[j] ;
+						if(otherNode != refEsp){
+							//get the power rating for this otherNode for the current node
+							//split the otherNode to get the AP and Client mac
+							let macs = otherNode.split("-");
+							let apPwr = 0;
+							let cPwr = 0;
+							
+							//get the rssi for the AP data and the client data
+							if(macs[0] in wifiData[refEsp]){
+								cPwr = getAverageRssi(wifiData[refEsp][macs[0]].rssi);
+							}
+							if(macs[1] in wifiData[refEsp]){
+								apPwr = getAverageRssi(wifiData[refEsp][macs[1]].rssi);
+							}
+							//Average them
+							let avgPwr = (apPwr+cPwr)/2;
+							
+							//if(otherNode in nodeData[refEsp]["OtherNodes"]){
+							//	minPwr = Math.min(minPwr,nodeData[refEsp]["OtherNodes"][otherNode]);
+							//}
+							
+							nodeData[refEsp]["OtherNodes"][otherNode] = avgPwr;
+							nodeData[otherNode]["OtherNodes"][refEsp] = avgPwr;
+						}
+					}
+					
+					
+				}
+			}
+			
+			function drawRssi(mac,x,y,dist,c){
+				
+				strokeWeight(2);
+				stroke(c);
+				line(x,y, x + dist,y);
+				let d = (dist/pwrScale).toFixed(2);
+				text(d+" meters", x + dist/2 ,y-10);
+								
+				
+				circle(x, y, dist*2);
+			}
+			
+			function drawEsp(mac,x,y,c){
+				strokeWeight(2);
+				stroke(c);		
+				textSize((10-zoom)+12);
+				text(mac,(x-mac.length*2),y+20);				
+				circle(x, y, (10-zoom)+10);
+			}
+			
+			function getPwr(rssi){
+				let txPower = -46; //measured dbm from AP at 1m
+				//http://tdmts.net/2017/02/04/using-wifi-rssi-to-estimate-distance-to-an-access-point
+				//file:///D:/WindowsUserFolders/Downloads/IEEECAMApaper.pdf
+				let d = 4; //path loss exponent
+				
+				return Math.pow(10, (txPower - rssi) / (10 * d));
+				
+			}
+			
+			function getLatestRssi(rssiArray){			
+
+				return getPwr( parseInt(rssiArray.slice(-1)[0].pwr) ) * pwrScale;
+			}
+			
+			function getAverageRssi(rssiArray){	
+				let total = 0;
+				for(let i = 0; i < rssiArray.length; i++){
+					
+					total += getPwr( parseInt(rssiArray[i].pwr) );
+				}
+								
+				return total / rssiArray.length * pwrScale;
+			}
+			
+			/**
+			 * Calculate distance between two points. 
+			 * Function dist() in p5.js does the same thing.
+			 * @param x1 - x of point 1
+			 * @param y1 - y of point 1
+			 * @param x2 - x of point 2
+			 * @param y2 - y of point 2
+			 * @returns Distance between point 1 and 2
+			 */
+			function calcDist(x1, y1, x2, y2) {
+				let a = (x2 - x1) * (x2 - x1)
+				let b = (y2 - y1) * (y2 - y1)
+				return sqrt(a + b)
+			}
+
+			// Let EPS (epsilon) be a small value
+			let EPS = 0.0000001;
+
+			// Let a point be a pair: (x, y)
+			function PointC(x, y) {
+			  this.x = x;
+			  this.y = y;
+			}
+
+
+			// Due to double rounding precision the value passed into the Math.acos
+			// function may be outside its domain of [-1, +1] which would return
+			// the value NaN which we do not want.
+			function acossafe(x) {
+			  if (x >= +1.0) return 0;
+			  if (x <= -1.0) return Math.PI;
+			  return Math.acos(x);
+			}
+
+			// Rotates a point about a fixed point at some angle 'a'
+			function rotatePoint(fp, pt, a) {
+			  let x = pt.x - fp.x;
+			  let y = pt.y - fp.y;
+			  let xRot = x * Math.cos(a) + y * Math.sin(a);
+			  let yRot = y * Math.cos(a) - x * Math.sin(a);
+			  return new PointC(fp.x+xRot,fp.y+yRot);
+			}
+
+			// Given two circles this method finds the intersection
+			// point(s) of the two circles (if any exists)
+			function circleCircleIntersectionPoints(cx1,cy1,r1,cx2,cy2,r2) {
+			  
+			  let r, R, d, dx, dy, cx, cy, Cx, Cy;
+			  
+			  if (r1 < r2) {
+				r  = r1;  R = r2;
+				cx = cx1; cy = cy1;
+				Cx = cx2; Cy = cy2;
+			  } else {
+				r  = r2; R  = r1;
+				Cx = cx1; Cy = cy1;
+				cx = cx2; cy = cy2;
+			  }
+			  
+			  // Compute the vector <dx, dy>
+			  dx = cx - Cx;
+			  dy = cy - Cy;
+
+			  // Find the distance between two points.
+			  d = Math.sqrt( dx*dx + dy*dy );
+			  
+			  // There are an infinite number of solutions
+			  // Seems appropriate to also return null
+			  if (d < EPS && Math.abs(R-r) < EPS) return [];
+			  
+			  // No intersection (circles centered at the 
+			  // same place with different size)
+			  else if (d < EPS) return [];
+			  
+			  let x = (dx / d) * R + Cx;
+			  let y = (dy / d) * R + Cy;
+			  let P = new PointC(x, y);
+			  
+			  // Single intersection (kissing circles)
+			  if (Math.abs((R+r)-d) < EPS || Math.abs(R-(r+d)) < EPS) return [P];
+			  
+			  // No intersection. Either the small circle contained within 
+			  // big circle or circles are simply disjoint.
+			  if ( (d+r) < R || (R+r < d) ) return [];
+			  
+			  let C = new PointC(Cx, Cy);
+			  let angle = acossafe((r*r-d*d-R*R)/(-2.0*d*R));
+			  let pt1 = rotatePoint(C, P, +angle);
+			  let pt2 = rotatePoint(C, P, -angle);
+			  return [pt1, pt2];
+			  
+			}
+			
+			function sleep(miliseconds) {
+			   var currentTime = new Date().getTime();
+
+			   while (currentTime + miliseconds >= new Date().getTime()) {
+			   }
+			}
+			
+			// Store the mouse and the previous offset
+			function mousePressed() {
+			  mouse = {x:mouseX,y:mouseY}; 
+			  poffset.x = offset.x;
+			  poffset.y = offset.y;
+			}
+
+			// Calculate the new offset based on change in mouse vs. previous offsey
+			function mouseDragged() {
+			  offset.x = mouseX - mouse.x + poffset.x;
+			  offset.y = mouseY - mouse.y + poffset.y;
+			}
+			
+			function mouseWheel(event) {
+				let e = -event.delta;
+				if(e>0){
+					zoom += 0.1;
+				}
+				if(e<0){
+					zoom -= 0.1;
+				}
+				
+				zoom = constrain(zoom,0.1,10);
+				return false;
+			}
+			
+			function keyPressed(){
+				if(key === 'n'){
+					showNodeRing = !showNodeRing;
+				}
+				
+				if(key === 'c'){
+					showClientRing = !showClientRing;
+				}
+				if(key === 'v'){
+					showClients = !showClients;
+				}
+			}
+			
+		</script>
+	</body>
+</html>
